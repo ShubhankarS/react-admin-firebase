@@ -1,4 +1,4 @@
-import { FirebaseFirestore } from "@firebase/firestore-types";
+import { FirebaseFirestore, CollectionReference, WhereFilterOp } from "@firebase/firestore-types";
 import { ResourceManager, IResource } from "./ResourceManager";
 import { RAFirebaseOptions } from "../RAFirebaseOptions";
 import { IFirebaseWrapper } from "./firebase/IFirebaseWrapper";
@@ -34,9 +34,56 @@ export class FirebaseClient implements IFirebaseClient {
 
     const filterSafe = params.filter || {};
 
-    const collectionQuery = filterSafe.collectionQuery;
+    // part of original code
+    // TODO see how to coexist with new code
+    // const collectionQuery = filterSafe.collectionQuery;
+    // delete filterSafe.collectionQuery;
+
+    // sanity check
     delete filterSafe.collectionQuery;
 
+    // clone the filter
+    let filter = JSON.parse(JSON.stringify(filterSafe));
+
+    // init collectionQuery
+    let collectionQuery: messageTypes.CollectionQueryType;
+
+    const allowedOperators = {
+      "<": true,
+      "<=": true,
+      "==": true,
+      ">": true,
+      ">=": true,
+      "array-contains": true
+    }
+
+    // apply filters to the firestore query
+    if (filter) {
+      collectionQuery = (a: CollectionReference): CollectionReference => {
+        Object.keys(filter).forEach((fieldName: string) => {
+          log(`apiGetList : adding filter for ${fieldName}`, filter[fieldName]);
+          let fieldConsumed = false;
+
+          // iterate over filters on fieldName
+          Object.keys(filter[fieldName]).forEach((operator: WhereFilterOp) => {
+            if (allowedOperators[operator]) {
+              log(`apiGetList : about to add filter for ${fieldName} with op ${operator} and value ${filter[fieldName][operator]}`);
+              a = <CollectionReference>a.where(fieldName, operator, filter[fieldName][operator]);
+              // todo remove global clearing?
+              fieldConsumed = true;
+            }
+          });
+
+          // delete ui filter if filter applied as a collectionQuery
+          if (fieldConsumed)
+            delete filterSafe[fieldName];
+        })
+        return a;
+      }
+    }
+
+
+    log("apiGetList", { resourceName, params, collectionQuery });
     const r = await this.tryGetResource(
       resourceName,
       "REFRESH",
